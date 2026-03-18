@@ -7,17 +7,15 @@ import jwt from "jsonwebtoken"
 import mongoose from "mongoose"
 
 // ─────────────────────────────────────────────
-// HELPER: generate both tokens and save refresh token to DB
+// HELPER
 // ─────────────────────────────────────────────
 const generateAccessAndRefereshTokens = async (userId) => {
   try {
     const user = await User.findById(userId)
     const accessToken = user.generateAccessToken()
     const refreshToken = user.generateRefreshToken()
-
     user.refreshToken = refreshToken
     await user.save({ validateBeforeSave: false })
-
     return { accessToken, refreshToken }
   } catch (error) {
     throw new ApiError(
@@ -50,7 +48,6 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(409, "User with email or username already exists")
   }
 
-  // ── safely read file paths ──────────────────
   const avatarLocalPath = req.files?.avatar?.[0]?.path
 
   let coverImageLocalPath
@@ -69,7 +66,6 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Avatar file is required")
   }
 
-  // ── upload to cloudinary ────────────────────
   const avatar = await uploadOnCloudinary(avatarLocalPath)
   console.log("avatar upload result:", avatar)
 
@@ -80,11 +76,12 @@ const registerUser = asyncHandler(async (req, res) => {
   if (!avatar) {
     throw new ApiError(
       500,
-      "Avatar upload to Cloudinary failed — check your Cloudinary credentials in .env"
+      "Avatar upload to Cloudinary failed"
     )
   }
 
-  // ── create user in DB ───────────────────────
+  console.log("About to create user in DB...")
+
   const user = await User.create({
     fullName,
     avatar: avatar.url,
@@ -93,6 +90,8 @@ const registerUser = asyncHandler(async (req, res) => {
     password,
     username: username.toLowerCase(),
   })
+
+  console.log("User created successfully:", user._id)
 
   const createdUser = await User.findById(user._id).select(
     "-password -refreshToken"
@@ -106,25 +105,34 @@ const registerUser = asyncHandler(async (req, res) => {
     .status(201)
     .json(new ApiResponse(200, createdUser, "User registered Successfully"))
 })
+
 // ─────────────────────────────────────────────
 // LOGIN USER
 // ─────────────────────────────────────────────
 const loginUser = asyncHandler(async (req, res) => {
   const { email, username, password } = req.body
 
+  console.log("Login attempt:", email, username)
+
   if (!username && !email) {
     throw new ApiError(400, "username or email is required")
   }
 
   const user = await User.findOne({
-    $or: [{ username }, { email }],
+    $or: [
+      { username: username?.toLowerCase() },
+      { email: email?.toLowerCase() },
+    ],
   })
+
+  console.log("User found:", user ? user.email : "NOT FOUND")
 
   if (!user) {
     throw new ApiError(404, "User does not exist")
   }
 
   const isPasswordValid = await user.isPasswordCorrect(password)
+  console.log("Password valid:", isPasswordValid)
 
   if (!isPasswordValid) {
     throw new ApiError(401, "Invalid user credentials")
@@ -166,14 +174,8 @@ const loginUser = asyncHandler(async (req, res) => {
 const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
-    {
-      $unset: {
-        refreshToken: 1,
-      },
-    },
-    {
-      new: true,
-    }
+    { $unset: { refreshToken: 1 } },
+    { new: true }
   )
 
   const options = {
@@ -313,11 +315,7 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
 
   const user = await User.findByIdAndUpdate(
     req.user?._id,
-    {
-      $set: {
-        avatar: avatar.url,
-      },
-    },
+    { $set: { avatar: avatar.url } },
     { new: true }
   ).select("-password")
 
@@ -339,16 +337,12 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
   const coverImage = await uploadOnCloudinary(coverImageLocalPath)
 
   if (!coverImage.url) {
-    throw new ApiError(400, "Error while uploading on avatar")
+    throw new ApiError(400, "Error while uploading cover image")
   }
 
   const user = await User.findByIdAndUpdate(
     req.user?._id,
-    {
-      $set: {
-        coverImage: coverImage.url,
-      },
-    },
+    { $set: { coverImage: coverImage.url } },
     { new: true }
   ).select("-password")
 
@@ -358,7 +352,7 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
 })
 
 // ─────────────────────────────────────────────
-// GET USER CHANNEL PROFILE (uses Aggregation Pipeline)
+// GET USER CHANNEL PROFILE
 // ─────────────────────────────────────────────
 const getUserChannelProfile = asyncHandler(async (req, res) => {
   const { username } = req.params
@@ -391,12 +385,8 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     },
     {
       $addFields: {
-        subscribersCount: {
-          $size: "$subscribers",
-        },
-        channelsSubscribedToCount: {
-          $size: "$subscribedTo",
-        },
+        subscribersCount: { $size: "$subscribers" },
+        channelsSubscribedToCount: { $size: "$subscribedTo" },
         isSubscribed: {
           $cond: {
             if: { $in: [req.user?._id, "$subscribers.subscriber"] },
@@ -421,7 +411,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
   ])
 
   if (!channel?.length) {
-    throw new ApiError(404, "channel does not exists")
+    throw new ApiError(404, "channel does not exist")
   }
 
   return res
@@ -432,7 +422,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 })
 
 // ─────────────────────────────────────────────
-// GET WATCH HISTORY (uses nested Aggregation Pipeline)
+// GET WATCH HISTORY
 // ─────────────────────────────────────────────
 const getWatchHistory = asyncHandler(async (req, res) => {
   const user = await User.aggregate([
@@ -467,9 +457,7 @@ const getWatchHistory = asyncHandler(async (req, res) => {
           },
           {
             $addFields: {
-              owner: {
-                $first: "$owner",
-              },
+              owner: { $first: "$owner" },
             },
           },
         ],
@@ -487,7 +475,6 @@ const getWatchHistory = asyncHandler(async (req, res) => {
       )
     )
 })
-
 
 // ─────────────────────────────────────────────
 // SEARCH USERS/CHANNELS

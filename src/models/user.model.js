@@ -51,7 +51,7 @@ const userSchema = new Schema(
   }
 )
 
-// ── pre save hook — NO async, NO next, just return Promise ──
+// ── pre save — no async, no next, pure Promise ──
 userSchema.pre("save", function () {
   if (!this.isModified("password")) return Promise.resolve()
   return bcrypt.hash(this.password, 10).then((hash) => {
