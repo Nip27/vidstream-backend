@@ -8,9 +8,20 @@ const app = express()
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN === '*'
-      ? '*'
-      : process.env.CORS_ORIGIN,
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:5175',
+        'https://vidstream-frontend-ecru.vercel.app',
+        process.env.CORS_ORIGIN,
+      ]
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+      } else {
+        callback(new Error('Not allowed by CORS'))
+      }
+    },
     credentials: true,
   })
 )
